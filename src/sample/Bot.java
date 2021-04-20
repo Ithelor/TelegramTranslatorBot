@@ -8,8 +8,9 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
-import java.io.*;
+import java.io.InputStream;
 import java.util.Properties;
+import java.io.IOException;
 
 public class Bot extends TelegramLongPollingBot {
 
@@ -41,11 +42,13 @@ public class Bot extends TelegramLongPollingBot {
         try {
 
             TelegramBotsApi telegramBotsApi = new TelegramBotsApi(DefaultBotSession.class);
+
             try {
                 telegramBotsApi.registerBot(new Bot());
             } catch (TelegramApiException e) {
                 e.printStackTrace();
             }
+
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
@@ -55,9 +58,9 @@ public class Bot extends TelegramLongPollingBot {
     {
 
         SendMessage sendMessage = new SendMessage();
-        sendMessage.enableMarkdown(true);
+
         sendMessage.setChatId(String.valueOf(message.getChatId()));
-        sendMessage.getReplyToMessageId();
+        sendMessage.setReplyToMessageId(message.getMessageId());
         sendMessage.setText(text);
 
         try {
@@ -76,11 +79,10 @@ public class Bot extends TelegramLongPollingBot {
 
             String text = message.getText();
 
-            try {
-                sendMsg(message, Translator.translate(text));
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            sendMsg(
+                    message,
+                    TranslateText.translateText("ja", text)
+            );
         }
     }
 
