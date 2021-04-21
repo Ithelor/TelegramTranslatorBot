@@ -5,20 +5,25 @@ import com.google.cloud.translate.Translate;
 import com.google.cloud.translate.TranslateOptions;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
+import org.telegram.telegrambots.meta.api.methods.AnswerInlineQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.inlinequery.InlineQuery;
+import org.telegram.telegrambots.meta.api.objects.inlinequery.inputmessagecontent.InputTextMessageContent;
+import org.telegram.telegrambots.meta.api.objects.inlinequery.result.InlineQueryResult;
+import org.telegram.telegrambots.meta.api.objects.inlinequery.result.InlineQueryResultArticle;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 import java.io.IOException;
+
+import static org.telegram.telegrambots.meta.api.methods.ParseMode.HTML;
 
 public class Bot extends TelegramLongPollingBot {
 
@@ -33,6 +38,13 @@ public class Bot extends TelegramLongPollingBot {
 
     static List<List<InlineKeyboardButton>> firstMarkupRowsInline = new ArrayList<>();
     static List<List<InlineKeyboardButton>> secondMarkupRowsInline = new ArrayList<>();
+
+    static Translate translate = TranslateOptions.getDefaultInstance().getService();
+
+    static boolean AUTO_MODE = false;
+    static boolean SPECIFIC_MODE = false;
+
+    private static final Integer CACHETIME = 0;
 
     public static void initConfig() {
 
@@ -88,13 +100,17 @@ public class Bot extends TelegramLongPollingBot {
 
         Message message = update.getMessage();
 
-        if (message != null && message.hasText()) {
+        if (update.hasInlineQuery()) {
+
+            handleInlineQuery(update.getInlineQuery());
+        }
+        else if (message != null && message.hasText()) {
 
             String text = message.getText();
 
             switch (message.getText()) {
 
-                case "/selectTargetLanguage":
+                case "/stl":
 
                     SendMessage inlineMessage = prepareInline(message);
 
@@ -157,6 +173,49 @@ public class Bot extends TelegramLongPollingBot {
         }
     }
 
+    private void handleInlineQuery(InlineQuery inlineQuery) {
+
+        String query = inlineQuery.getQuery();
+
+        try {
+            if (!query.isEmpty()) {
+
+                AnswerInlineQuery answerInlineQuery = new AnswerInlineQuery();
+                answerInlineQuery.setInlineQueryId(inlineQuery.getId());
+                answerInlineQuery.setResults(prepareArticle(inlineQuery.getQuery()));
+                answerInlineQuery.setCacheTime(CACHETIME);
+
+                execute(answerInlineQuery);
+            }
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static List<InlineQueryResult> prepareArticle(String query) {
+
+        List<InlineQueryResult> result = new ArrayList<>();
+
+        InputTextMessageContent messageContent = new InputTextMessageContent();
+        messageContent.setMessageText(
+                "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query) +
+                "\nOriginal (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
+        );
+
+        InlineQueryResultArticle article = new InlineQueryResultArticle();
+        article.setInputMessageContent(messageContent);
+        article.setId("inline_query_translation");
+        article.setTitle(
+                "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query)
+        );
+        article.setDescription(
+                "Original (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
+        );
+
+        result.add(article);
+        return result;
+    }
+
     public static String getCodeByName(String name) {
 
         Translate translate = TranslateOptions.getDefaultInstance().getService();
@@ -166,6 +225,20 @@ public class Bot extends TelegramLongPollingBot {
 
             if (language.getName().equals(name))
                 return language.getCode();
+        }
+
+        return null;
+    }
+
+    public static String getNameByCode(String code) {
+
+        Translate translate = TranslateOptions.getDefaultInstance().getService();
+        List<Language> languages = translate.listSupportedLanguages();
+
+        for (Language language : languages) {
+
+            if (language.getCode().equals(code))
+                return language.getName();
         }
 
         return null;
