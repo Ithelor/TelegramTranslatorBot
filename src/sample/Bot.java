@@ -10,10 +10,7 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
@@ -28,7 +25,14 @@ public class Bot extends TelegramLongPollingBot {
     static String botName;
     static String botToken;
 
-    static String targetLanguage = "en";
+    static String targetLanguageCode = "en";
+    static String targetLanguageName = "English";
+
+    static InlineKeyboardMarkup firstInlineMarkup = new InlineKeyboardMarkup();
+    static InlineKeyboardMarkup secondInlineMarkup = new InlineKeyboardMarkup();
+
+    static List<List<InlineKeyboardButton>> firstMarkupRowsInline = new ArrayList<>();
+    static List<List<InlineKeyboardButton>> secondMarkupRowsInline = new ArrayList<>();
 
     public static void initConfig() {
 
@@ -74,7 +78,6 @@ public class Bot extends TelegramLongPollingBot {
         sendMessage.setText(text);
 
         try {
-//            setButtons(sendMessage);
             execute(sendMessage);
         } catch (TelegramApiException e) {
             e.printStackTrace();
@@ -93,7 +96,6 @@ public class Bot extends TelegramLongPollingBot {
 
                 case "/selectTargetLanguage":
 
-                    // TODO: drop languages list : kind-of-done
                     SendMessage inlineMessage = prepareInline(message);
 
                     try {
@@ -111,8 +113,8 @@ public class Bot extends TelegramLongPollingBot {
                 default:
                     sendMsg(
                             message,
-                            // TODO: language status if switched
-                            TranslateText.translateText(targetLanguage, text)
+                            // TODO: switch languages + notification
+                            TranslateText.translateText(targetLanguageCode, text)
                     );
                     break;
             }
@@ -126,9 +128,26 @@ public class Bot extends TelegramLongPollingBot {
             EditMessageText editMessageText = new EditMessageText();
             editMessageText.setChatId(String.valueOf(chat_id));
             editMessageText.setMessageId((int) message_id);
-            editMessageText.setText("Selected " + call_data);
 
-            targetLanguage = getCodeByName(call_data);
+            switch (call_data)
+            {
+
+                case (">"):
+                    editMessageText.setReplyMarkup(secondInlineMarkup);
+                    editMessageText.setText("Please, select target language - page 2/2");
+                    break;
+
+                case ("<"):
+                    editMessageText.setReplyMarkup(firstInlineMarkup);
+                    editMessageText.setText("Please, select target language - page 1/2");
+                    break;
+
+                default:
+                    targetLanguageCode = getCodeByName(call_data);
+                    targetLanguageName = call_data;
+                    editMessageText.setText("Selected " + call_data);
+                    break;
+            }
 
             try {
                 execute(editMessageText);
@@ -152,66 +171,90 @@ public class Bot extends TelegramLongPollingBot {
         return null;
     }
 
-    // TODO: adequate solution for entire languages list (e.g. commented below) ?
     public SendMessage prepareInline(Message message) {
+
+        // TODO: gayISH - find an adequate solution
+        if (firstInlineMarkup.getKeyboard() != null && secondInlineMarkup.getKeyboard() != null) {
+
+            firstInlineMarkup.getKeyboard().clear();
+            secondInlineMarkup.getKeyboard().clear();
+        }
 
         SendMessage tempMessage = new SendMessage();
         tempMessage.setChatId(String.valueOf(message.getChatId()));
-        tempMessage.setText("Please, select target language");
+        tempMessage.setText("Please, select target language - page 1/2");
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setReplyToMessageId(message.getMessageId());
 
-        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+        Translate translate = TranslateOptions.getDefaultInstance().getService();
+        List<Language> languages = translate.listSupportedLanguages();
 
-//        Translate translate = TranslateOptions.getDefaultInstance().getService();
-//        List<Language> languages = translate.listSupportedLanguages();
+        int buttonsPerRow = 4;
+        double buttonRows = Math.ceil(Double.parseDouble(String.valueOf(languages.size())) / buttonsPerRow / 2
+                + 1); // 1 == number of auxiliary (navigation) rows
+
+        int languageIndex = 0;
 
         List<InlineKeyboardButton> rowInline = new ArrayList<>();
+        InlineKeyboardButton tempInlineKeyboardButton;
 
-        InlineKeyboardButton InlineKeyboardButton1 = new InlineKeyboardButton();
-        InlineKeyboardButton1.setText("Russian (" + getCodeByName("Russian") + ")");
-        InlineKeyboardButton1.setCallbackData("Russian");
+        for (int i = 0; i < buttonRows; i++)
+        {
 
-        InlineKeyboardButton InlineKeyboardButton2 = new InlineKeyboardButton();
-        InlineKeyboardButton2.setText("English (" + getCodeByName("English") + ")");
-        InlineKeyboardButton2.setCallbackData("English");
+            rowInline = new ArrayList<>();
 
-        InlineKeyboardButton InlineKeyboardButton3 = new InlineKeyboardButton();
-        InlineKeyboardButton3.setText("Japanese (" + getCodeByName("Japanese") + ")");
-        InlineKeyboardButton3.setCallbackData("Japanese");
+            for (int j = 0; j < buttonsPerRow; j++) {
 
-        rowInline.add(InlineKeyboardButton1);
-        rowInline.add(InlineKeyboardButton2);
-        rowInline.add(InlineKeyboardButton3);
+                tempInlineKeyboardButton = new InlineKeyboardButton();
+                tempInlineKeyboardButton.setText(languages.get(languageIndex).getName());
+                tempInlineKeyboardButton.setCallbackData(languages.get(languageIndex).getName());
 
-        rowsInline.add(rowInline);
+                rowInline.add(tempInlineKeyboardButton);
 
-////        for (Language language : languages) {
-//        for (int i = 0; i < languages.size(); i++) {
-//
-//            InlineKeyboardButton tempInlineKeyboardButton = new InlineKeyboardButton();
-//
-//            tempInlineKeyboardButton.setText(i+1 + ": " + languages.get(i).getName() + " (" + languages.get(i).getCode() + ")");
-//            tempInlineKeyboardButton.setCallbackData(languages.get(i).getName());
-//
-//            rowInline.add(tempInlineKeyboardButton);
-//
-//            System.out.println("Before: " + rowInline);
-//
-//            // tried splitting into several rows..
-//            if (i % 5 == 0 && i != languages.size() - 1)
-//            {
-//                rowsInline.add(rowInline);
-//
-//                System.out.println("In: " + rowInline);
-//
-////                rowInline.clear();
-//            }
-//
-//            System.out.println("After: " + rowInline);
-//        }
+                languageIndex++;
+            }
+            firstMarkupRowsInline.add(rowInline);
+        }
 
-        markupInline.setKeyboard(rowsInline);
-        tempMessage.setReplyMarkup(markupInline);
+        tempInlineKeyboardButton = new InlineKeyboardButton();
+        tempInlineKeyboardButton.setText(">");
+        tempInlineKeyboardButton.setCallbackData(">");
+
+        rowInline.clear();
+        rowInline.add(tempInlineKeyboardButton);
+
+        firstInlineMarkup.setKeyboard(firstMarkupRowsInline);
+        tempMessage.setReplyMarkup(firstInlineMarkup);
+
+        for (int i = 0; i < buttonRows; i++)
+        {
+
+            rowInline = new ArrayList<>();
+
+            for (int j = 0; j < buttonsPerRow; j++) {
+
+                if (languageIndex < languages.size()) {
+
+                    tempInlineKeyboardButton = new InlineKeyboardButton();
+                    tempInlineKeyboardButton.setText(languages.get(languageIndex).getName());
+                    tempInlineKeyboardButton.setCallbackData(languages.get(languageIndex).getName());
+
+                    rowInline.add(tempInlineKeyboardButton);
+
+                    languageIndex++;
+                }
+            }
+            secondMarkupRowsInline.add(rowInline);
+        }
+
+        tempInlineKeyboardButton = new InlineKeyboardButton();
+        tempInlineKeyboardButton.setText("<");
+        tempInlineKeyboardButton.setCallbackData("<");
+
+        rowInline.clear();
+        rowInline.add(tempInlineKeyboardButton);
+
+        secondInlineMarkup.setKeyboard(secondMarkupRowsInline);
 
         return tempMessage;
     }
