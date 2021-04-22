@@ -19,11 +19,10 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
+import javax.xml.crypto.Data;
 import java.io.InputStream;
 import java.util.*;
 import java.io.IOException;
-
-import static org.telegram.telegrambots.meta.api.methods.ParseMode.HTML;
 
 public class Bot extends TelegramLongPollingBot {
 
@@ -33,16 +32,17 @@ public class Bot extends TelegramLongPollingBot {
     static String targetLanguageCode = "en";
     static String targetLanguageName = "English";
 
-    static InlineKeyboardMarkup firstInlineMarkup = new InlineKeyboardMarkup();
-    static InlineKeyboardMarkup secondInlineMarkup = new InlineKeyboardMarkup();
-
-    static List<List<InlineKeyboardButton>> firstMarkupRowsInline = new ArrayList<>();
-    static List<List<InlineKeyboardButton>> secondMarkupRowsInline = new ArrayList<>();
-
     static Translate translate = TranslateOptions.getDefaultInstance().getService();
+    static List<Language> languages = translate.listSupportedLanguages();
 
-    static boolean AUTO_MODE = false;
-    static boolean SPECIFIC_MODE = false;
+    static InlineKeyboardMarkup firstSTLMarkup = new InlineKeyboardMarkup();
+    static InlineKeyboardMarkup secondSTLMarkup = new InlineKeyboardMarkup();
+
+    static List<List<InlineKeyboardButton>> firstSTLMarkupRowsInline = new ArrayList<>();
+    static List<List<InlineKeyboardButton>> secondSTLMarkupRowsInline = new ArrayList<>();
+
+    static String MODE = "MANUAL"; // either MANUAL for translation-by-command or SPECIFIED for automatic translation of specific language
+    static String SPECIFIED_LANGUAGE_CODE;
 
     private static final Integer CACHETIME = 0;
 
@@ -81,7 +81,7 @@ public class Bot extends TelegramLongPollingBot {
         }
     }
 
-    public void sendMsg(Message message, String text) {
+    private void sendMsg(Message message, String text) {
 
         SendMessage sendMessage = new SendMessage();
 
@@ -107,12 +107,14 @@ public class Bot extends TelegramLongPollingBot {
         else if (message != null && message.hasText()) {
 
             String text = message.getText();
+            SendMessage inlineMessage;
 
             switch (message.getText()) {
 
                 case "/stl":
+                case "/stl@NumeriusCloudBot":
 
-                    SendMessage inlineMessage = prepareInline(message);
+                    inlineMessage = prepareSTLKeyboard(message);
 
                     try {
                         execute(inlineMessage);
@@ -121,17 +123,41 @@ public class Bot extends TelegramLongPollingBot {
                     }
                     break;
 
-                case "/anotherCommand":
+                case "/specify":
+                case "/specify@NumeriusCloudBot":
 
-                    // TODO: something
+                    sendMsg(
+                            message,
+                            "Language must be specified"
+                    );
                     break;
 
                 default:
-                    sendMsg(
-                            message,
-                            // TODO: switch languages + notification
-                            TranslateText.translateText(targetLanguageCode, text)
-                    );
+
+                    if (message.getText().startsWith("/specify ") || message.getText().startsWith("/specify@NumeriusCloudBot "))
+                    {
+                        MODE = "SPECIFIED";
+                        SPECIFIED_LANGUAGE_CODE = getCodeByName(text.substring(text.indexOf(' ') + 1));
+
+                        DatabaseHandler.handleSpecify(SPECIFIED_LANGUAGE_CODE, message.getChatId());
+
+                        sendMsg(
+                                message,
+                                "Specified for " + text.substring(text.indexOf(' ') + 1)
+                        );
+                        System.out.println(MODE + " " + SPECIFIED_LANGUAGE_CODE);
+                    }
+                    else if (MODE.equals("SPECIFIED") &&
+                            translate.detect(message.getText()).getLanguage().equals(SPECIFIED_LANGUAGE_CODE))
+
+                        sendMsg(
+                                message,
+                                // TODO: switch languages + notification
+                                TranslateText.translateText(
+                                        DatabaseHandler.getCurrentTargetLanguage(message.getChatId()),
+                                        text
+                                )
+                        );
                     break;
             }
         }
@@ -149,19 +175,20 @@ public class Bot extends TelegramLongPollingBot {
             {
 
                 case (">"):
-                    editMessageText.setReplyMarkup(secondInlineMarkup);
+                    editMessageText.setReplyMarkup(secondSTLMarkup);
                     editMessageText.setText("Please, select target language - page 2/2");
                     break;
 
                 case ("<"):
-                    editMessageText.setReplyMarkup(firstInlineMarkup);
+                    editMessageText.setReplyMarkup(firstSTLMarkup);
                     editMessageText.setText("Please, select target language - page 1/2");
                     break;
 
                 default:
                     targetLanguageCode = getCodeByName(call_data);
                     targetLanguageName = call_data;
-                    editMessageText.setText("Selected " + call_data);
+                    DatabaseHandler.handleSTL(call_data, update.getCallbackQuery().getMessage().getChatId());
+                    editMessageText.setText("@" + update.getCallbackQuery().getFrom().getUserName() + " selected " + call_data);
                     break;
             }
 
@@ -199,7 +226,7 @@ public class Bot extends TelegramLongPollingBot {
         InputTextMessageContent messageContent = new InputTextMessageContent();
         messageContent.setMessageText(
                 "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query) +
-                "\nOriginal (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
+                        "\nOriginal (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
         );
 
         InlineQueryResultArticle article = new InlineQueryResultArticle();
@@ -218,9 +245,6 @@ public class Bot extends TelegramLongPollingBot {
 
     public static String getCodeByName(String name) {
 
-        Translate translate = TranslateOptions.getDefaultInstance().getService();
-        List<Language> languages = translate.listSupportedLanguages();
-
         for (Language language : languages) {
 
             if (language.getName().equals(name))
@@ -232,9 +256,6 @@ public class Bot extends TelegramLongPollingBot {
 
     public static String getNameByCode(String code) {
 
-        Translate translate = TranslateOptions.getDefaultInstance().getService();
-        List<Language> languages = translate.listSupportedLanguages();
-
         for (Language language : languages) {
 
             if (language.getCode().equals(code))
@@ -244,32 +265,28 @@ public class Bot extends TelegramLongPollingBot {
         return null;
     }
 
-    public SendMessage prepareInline(Message message) {
+    private SendMessage prepareSTLKeyboard(Message message) {
 
         // TODO: gayISH - find an adequate solution
-        if (firstInlineMarkup.getKeyboard() != null && secondInlineMarkup.getKeyboard() != null) {
+        if (firstSTLMarkup.getKeyboard() != null && secondSTLMarkup.getKeyboard() != null) {
 
-            firstInlineMarkup.getKeyboard().clear();
-            secondInlineMarkup.getKeyboard().clear();
+            firstSTLMarkup.getKeyboard().clear();
+            secondSTLMarkup.getKeyboard().clear();
         }
 
         SendMessage tempMessage = new SendMessage();
-        tempMessage.setChatId(String.valueOf(message.getChatId()));
-        tempMessage.setText("Please, select target language - page 1/2");
-        tempMessage.setChatId(String.valueOf(message.getChatId()));
-        tempMessage.setReplyToMessageId(message.getMessageId());
-
-        Translate translate = TranslateOptions.getDefaultInstance().getService();
-        List<Language> languages = translate.listSupportedLanguages();
+        InlineKeyboardButton tempInlineKeyboardButton;
+        List<InlineKeyboardButton> rowInline = new ArrayList<>();
 
         int buttonsPerRow = 4;
         double buttonRows = Math.ceil(Double.parseDouble(String.valueOf(languages.size())) / buttonsPerRow / 2
                 + 1); // 1 == number of auxiliary (navigation) rows
-
         int languageIndex = 0;
 
-        List<InlineKeyboardButton> rowInline = new ArrayList<>();
-        InlineKeyboardButton tempInlineKeyboardButton;
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setText("Please, select target language - page 1/2");
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setReplyToMessageId(message.getMessageId());
 
         for (int i = 0; i < buttonRows; i++)
         {
@@ -286,7 +303,7 @@ public class Bot extends TelegramLongPollingBot {
 
                 languageIndex++;
             }
-            firstMarkupRowsInline.add(rowInline);
+            firstSTLMarkupRowsInline.add(rowInline);
         }
 
         tempInlineKeyboardButton = new InlineKeyboardButton();
@@ -296,8 +313,8 @@ public class Bot extends TelegramLongPollingBot {
         rowInline.clear();
         rowInline.add(tempInlineKeyboardButton);
 
-        firstInlineMarkup.setKeyboard(firstMarkupRowsInline);
-        tempMessage.setReplyMarkup(firstInlineMarkup);
+        firstSTLMarkup.setKeyboard(firstSTLMarkupRowsInline);
+        tempMessage.setReplyMarkup(firstSTLMarkup);
 
         for (int i = 0; i < buttonRows; i++)
         {
@@ -317,7 +334,7 @@ public class Bot extends TelegramLongPollingBot {
                     languageIndex++;
                 }
             }
-            secondMarkupRowsInline.add(rowInline);
+            secondSTLMarkupRowsInline.add(rowInline);
         }
 
         tempInlineKeyboardButton = new InlineKeyboardButton();
@@ -327,7 +344,7 @@ public class Bot extends TelegramLongPollingBot {
         rowInline.clear();
         rowInline.add(tempInlineKeyboardButton);
 
-        secondInlineMarkup.setKeyboard(secondMarkupRowsInline);
+        secondSTLMarkup.setKeyboard(secondSTLMarkupRowsInline);
 
         return tempMessage;
     }
