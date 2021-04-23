@@ -19,7 +19,6 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
-import javax.xml.crypto.Data;
 import java.io.InputStream;
 import java.util.*;
 import java.io.IOException;
@@ -29,8 +28,8 @@ public class Bot extends TelegramLongPollingBot {
     static String botName;
     static String botToken;
 
-    static String targetLanguageCode = "en";
-    static String targetLanguageName = "English";
+    static String targetLanguageCode;
+    static String targetLanguageName;
 
     static Translate translate = TranslateOptions.getDefaultInstance().getService();
     static List<Language> languages = translate.listSupportedLanguages();
@@ -41,8 +40,14 @@ public class Bot extends TelegramLongPollingBot {
     static List<List<InlineKeyboardButton>> firstSTLMarkupRowsInline = new ArrayList<>();
     static List<List<InlineKeyboardButton>> secondSTLMarkupRowsInline = new ArrayList<>();
 
-    static String MODE = "MANUAL"; // either MANUAL for translation-by-command or SPECIFIED for automatic translation of specific language
+    static InlineKeyboardMarkup spcMarkup = new InlineKeyboardMarkup();
+    static List<List<InlineKeyboardButton>> spcMarkupRowsInline = new ArrayList<>();
+
+    static String MODE; // either MANUAL for
+                            // TODO: translation-by-command
+                                // or SPECIFIED for automatic translation of specific language
     static String SPECIFIED_LANGUAGE_CODE;
+    static Boolean AWAITING_SPECIFICATION = false;
 
     private static final Integer CACHETIME = 0;
 
@@ -123,41 +128,103 @@ public class Bot extends TelegramLongPollingBot {
                     }
                     break;
 
-                case "/specify":
-                case "/specify@NumeriusCloudBot":
+                case "/spc":
+                case "/spc@NumeriusCloudBot":
 
-                    sendMsg(
+                    // TODO: redo
+                    inlineMessage = prepareSTLKeyboard(message);
+                    inlineMessage = prepareSPCKeyboard(message);
+
+                    try {
+                        execute(inlineMessage);
+                    } catch (TelegramApiException e) {
+                        e.printStackTrace();
+                    }
+                    break;
+
+                case "/status":
+                case "/status@NumeriusCloudBot":
+
+                    if (
+                        DatabaseHandler.getValueByColumn
+                        (
+                            "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                            "1",
+                            message.getChatId()
+                        ).equals("MANUAL")
+                    ) {
+                        sendMsg(
                             message,
-                            "Language must be specified"
-                    );
+                            "Status: " +
+                            DatabaseHandler.getValueByColumn(
+                                    "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                    "1",
+                                    message.getChatId()
+                            ).toLowerCase()
+                        );
+                    } else {
+                        sendMsg(
+                            message,
+                            "Status: " +
+                                DatabaseHandler.getValueByColumn(
+                                    "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                    "1",
+                                    message.getChatId()
+                                ).toLowerCase() +
+                                " " +
+                                Objects.requireNonNull(getNameByCode(
+                                    DatabaseHandler.getValueByColumn(
+                                        "SELECT latest_specified_language_code FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                        "1",
+                                        message.getChatId()
+                                    )
+                                )).toLowerCase() +
+                                " to " +
+                                Objects.requireNonNull(getNameByCode(
+                                    DatabaseHandler.getValueByColumn(
+                                        "SELECT last_target_language_code FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                        "1",
+                                        message.getChatId()
+                                    )
+                                )).toLowerCase()
+                        );
+                    }
+
                     break;
 
                 default:
 
-                    if (message.getText().startsWith("/specify ") || message.getText().startsWith("/specify@NumeriusCloudBot "))
+                    if (
+                        DatabaseHandler.getValueByColumn
+                        (
+                            "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                            "1",
+                            message.getChatId()
+                        )
+                        .equals("SPECIFIED")
+                    )
                     {
-                        MODE = "SPECIFIED";
-                        SPECIFIED_LANGUAGE_CODE = getCodeByName(text.substring(text.indexOf(' ') + 1));
 
-                        DatabaseHandler.handleSpecify(SPECIFIED_LANGUAGE_CODE, message.getChatId());
+                        SPECIFIED_LANGUAGE_CODE =
+                            DatabaseHandler.getValueByColumn
+                            (
+                                "SELECT latest_specified_language_code FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                "1",
+                                message.getChatId()
+                            );
 
-                        sendMsg(
+                        if (SPECIFIED_LANGUAGE_CODE.equals(translate.detect(message.getText()).getLanguage())) {
+
+                            sendMsg(
                                 message,
-                                "Specified for " + text.substring(text.indexOf(' ') + 1)
-                        );
-                        System.out.println(MODE + " " + SPECIFIED_LANGUAGE_CODE);
-                    }
-                    else if (MODE.equals("SPECIFIED") &&
-                            translate.detect(message.getText()).getLanguage().equals(SPECIFIED_LANGUAGE_CODE))
-
-                        sendMsg(
-                                message,
-                                // TODO: switch languages + notification
+                                // TODO: switch languages + switch notification
                                 TranslateText.translateText(
-                                        DatabaseHandler.getCurrentTargetLanguage(message.getChatId()),
-                                        text
+                                    DatabaseHandler.getCurrentTargetLanguage(message.getChatId()),
+                                    text
                                 )
-                        );
+                            );
+                        }
+                    }
                     break;
             }
         }
@@ -174,21 +241,54 @@ public class Bot extends TelegramLongPollingBot {
             switch (call_data)
             {
 
-                case (">"):
+                case (">STL2"):
+
                     editMessageText.setReplyMarkup(secondSTLMarkup);
-                    editMessageText.setText("Please, select target language - page 2/2");
+                    editMessageText.setText("Please, select language - page 2/2");
+
                     break;
 
-                case ("<"):
+                case ("<STL1"):
+
                     editMessageText.setReplyMarkup(firstSTLMarkup);
-                    editMessageText.setText("Please, select target language - page 1/2");
+                    editMessageText.setText("Please, select language - page 1/2");
+
+                    break;
+
+                case ("MANUAL"):
+
+                    MODE = "MANUAL";
+                    DatabaseHandler.handleSpecify(MODE, SPECIFIED_LANGUAGE_CODE, update.getCallbackQuery().getMessage().getChatId());
+                    editMessageText.setText("Set " + call_data + " mode (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
+
+                    break;
+
+                case ("SPECIFIED"):
+
+                    AWAITING_SPECIFICATION = true;
+                    editMessageText.setReplyMarkup(firstSTLMarkup);
+                    editMessageText.setText("Please, select a language for specified mode");
+
                     break;
 
                 default:
-                    targetLanguageCode = getCodeByName(call_data);
-                    targetLanguageName = call_data;
-                    DatabaseHandler.handleSTL(call_data, update.getCallbackQuery().getMessage().getChatId());
-                    editMessageText.setText("@" + update.getCallbackQuery().getFrom().getUserName() + " selected " + call_data);
+
+                    if (AWAITING_SPECIFICATION) {
+
+                        MODE = "SPECIFIED";
+                        SPECIFIED_LANGUAGE_CODE = getCodeByName(call_data);
+
+                        DatabaseHandler.handleSpecify(MODE, SPECIFIED_LANGUAGE_CODE, update.getCallbackQuery().getMessage().getChatId());
+                        editMessageText.setText("Specified " + call_data + " (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
+                        AWAITING_SPECIFICATION = false;
+                    }
+                    else {
+
+                        targetLanguageCode = getCodeByName(call_data);
+                        targetLanguageName = call_data;
+                        DatabaseHandler.handleSTL(call_data, update.getCallbackQuery().getMessage().getChatId());
+                        editMessageText.setText("Selected " + call_data + " (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
+                    }
                     break;
             }
 
@@ -225,18 +325,18 @@ public class Bot extends TelegramLongPollingBot {
 
         InputTextMessageContent messageContent = new InputTextMessageContent();
         messageContent.setMessageText(
-                "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query) +
-                        "\nOriginal (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
+            "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query) +
+            "\nOriginal (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
         );
 
         InlineQueryResultArticle article = new InlineQueryResultArticle();
         article.setInputMessageContent(messageContent);
         article.setId("inline_query_translation");
         article.setTitle(
-                "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query)
+            "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query)
         );
         article.setDescription(
-                "Original (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
+            "Original (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
         );
 
         result.add(article);
@@ -308,7 +408,7 @@ public class Bot extends TelegramLongPollingBot {
 
         tempInlineKeyboardButton = new InlineKeyboardButton();
         tempInlineKeyboardButton.setText(">");
-        tempInlineKeyboardButton.setCallbackData(">");
+        tempInlineKeyboardButton.setCallbackData(">STL2");
 
         rowInline.clear();
         rowInline.add(tempInlineKeyboardButton);
@@ -339,12 +439,49 @@ public class Bot extends TelegramLongPollingBot {
 
         tempInlineKeyboardButton = new InlineKeyboardButton();
         tempInlineKeyboardButton.setText("<");
-        tempInlineKeyboardButton.setCallbackData("<");
+        tempInlineKeyboardButton.setCallbackData("<STL1");
 
         rowInline.clear();
         rowInline.add(tempInlineKeyboardButton);
 
         secondSTLMarkup.setKeyboard(secondSTLMarkupRowsInline);
+
+        return tempMessage;
+    }
+
+    private SendMessage prepareSPCKeyboard(Message message) {
+
+        // TODO: gayISH - find an adequate solution
+        if (spcMarkup.getKeyboard() != null) {
+
+            spcMarkup.getKeyboard().clear();
+        }
+
+        SendMessage tempMessage = new SendMessage();
+        InlineKeyboardButton tempInlineKeyboardButton;
+        List<InlineKeyboardButton> rowInline = new ArrayList<>();
+
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setText("Please, select translation mode");
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setReplyToMessageId(message.getMessageId());
+
+        tempInlineKeyboardButton = new InlineKeyboardButton();
+        tempInlineKeyboardButton.setText("MANUAL");
+        tempInlineKeyboardButton.setCallbackData("MANUAL");
+
+        rowInline.add(tempInlineKeyboardButton);
+
+        tempInlineKeyboardButton = new InlineKeyboardButton();
+        tempInlineKeyboardButton.setText("SPECIFIED");
+        tempInlineKeyboardButton.setCallbackData("SPECIFIED");
+
+        rowInline.add(tempInlineKeyboardButton);
+
+        spcMarkupRowsInline.add(rowInline);
+
+        spcMarkup.setKeyboard(spcMarkupRowsInline);
+        tempMessage.setReplyMarkup(spcMarkup);
 
         return tempMessage;
     }
