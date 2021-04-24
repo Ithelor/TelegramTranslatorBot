@@ -28,17 +28,15 @@ public class Bot extends TelegramLongPollingBot {
     static String botName;
     static String botToken;
 
-    static String targetLanguageCode;
     static String targetLanguageName;
+    static String targetLanguageCode;
 
     static Translate translate = TranslateOptions.getDefaultInstance().getService();
     static List<Language> languages = translate.listSupportedLanguages();
 
-    static InlineKeyboardMarkup firstSTLMarkup = new InlineKeyboardMarkup();
-    static InlineKeyboardMarkup secondSTLMarkup = new InlineKeyboardMarkup();
+    static List<InlineKeyboardMarkup> stlMarkup = new ArrayList<>();
 
-    static List<List<InlineKeyboardButton>> firstSTLMarkupRowsInline = new ArrayList<>();
-    static List<List<InlineKeyboardButton>> secondSTLMarkupRowsInline = new ArrayList<>();
+    static List<List<InlineKeyboardButton>> stlMarkupRowsInline = new ArrayList<>();
 
     static InlineKeyboardMarkup spcMarkup = new InlineKeyboardMarkup();
     static List<List<InlineKeyboardButton>> spcMarkupRowsInline = new ArrayList<>();
@@ -48,6 +46,8 @@ public class Bot extends TelegramLongPollingBot {
                                 // or SPECIFIED for automatic translation of specific language
     static String SPECIFIED_LANGUAGE_CODE;
     static Boolean AWAITING_SPECIFICATION = false;
+
+    static int STL_PAGES_NUM = 0;
 
     private static final Integer CACHETIME = 0;
 
@@ -241,20 +241,6 @@ public class Bot extends TelegramLongPollingBot {
             switch (call_data)
             {
 
-                case (">STL2"):
-
-                    editMessageText.setReplyMarkup(secondSTLMarkup);
-                    editMessageText.setText("Please, select language - page 2/2");
-
-                    break;
-
-                case ("<STL1"):
-
-                    editMessageText.setReplyMarkup(firstSTLMarkup);
-                    editMessageText.setText("Please, select language - page 1/2");
-
-                    break;
-
                 case ("MANUAL"):
 
                     MODE = "MANUAL";
@@ -266,7 +252,7 @@ public class Bot extends TelegramLongPollingBot {
                 case ("SPECIFIED"):
 
                     AWAITING_SPECIFICATION = true;
-                    editMessageText.setReplyMarkup(firstSTLMarkup);
+                    editMessageText.setReplyMarkup(stlMarkup.get(0));
                     editMessageText.setText("Please, select a language for specified mode");
 
                     break;
@@ -275,19 +261,40 @@ public class Bot extends TelegramLongPollingBot {
 
                     if (AWAITING_SPECIFICATION) {
 
-                        MODE = "SPECIFIED";
-                        SPECIFIED_LANGUAGE_CODE = getCodeByName(call_data);
+                        // TODO: change stl navigation button label on click
+                        if (call_data.startsWith("stl")) {
 
-                        DatabaseHandler.handleSpecify(MODE, SPECIFIED_LANGUAGE_CODE, update.getCallbackQuery().getMessage().getChatId());
-                        editMessageText.setText("Specified " + call_data + " (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
-                        AWAITING_SPECIFICATION = false;
+                            int pageNum = Integer.parseInt(call_data.substring(3)) - 1;
+                            editMessageText.setReplyMarkup(stlMarkup.get(pageNum));
+                            editMessageText.setText("Please, select language - page " + (pageNum + 1) + "/" + STL_PAGES_NUM);
+                        }
+                        else {
+
+                            MODE = "SPECIFIED";
+                            SPECIFIED_LANGUAGE_CODE = getCodeByName(call_data);
+
+                            targetLanguageCode = getCodeByName(call_data);
+                            targetLanguageName = call_data;
+                            DatabaseHandler.handleSpecify(MODE, SPECIFIED_LANGUAGE_CODE, update.getCallbackQuery().getMessage().getChatId());
+                            editMessageText.setText("Selected " + call_data + " (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
+
+                            AWAITING_SPECIFICATION = false;
+                        }
                     }
                     else {
 
-                        targetLanguageCode = getCodeByName(call_data);
-                        targetLanguageName = call_data;
-                        DatabaseHandler.handleSTL(call_data, update.getCallbackQuery().getMessage().getChatId());
-                        editMessageText.setText("Selected " + call_data + " (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
+                        if (call_data.startsWith("stl")) {
+
+                            int pageNum = Integer.parseInt(call_data.substring(3)) - 1;
+                            editMessageText.setReplyMarkup(stlMarkup.get(pageNum));
+                            editMessageText.setText("Please, select language - page " + (pageNum + 1) + "/" + STL_PAGES_NUM);
+                        }
+                        else {
+                            targetLanguageCode = getCodeByName(call_data);
+                            targetLanguageName = call_data;
+                            DatabaseHandler.handleSTL(call_data, update.getCallbackQuery().getMessage().getChatId());
+                            editMessageText.setText("Selected " + call_data + " (@" + update.getCallbackQuery().getFrom().getUserName() + ")");
+                        }
                     }
                     break;
             }
@@ -325,8 +332,12 @@ public class Bot extends TelegramLongPollingBot {
 
         InputTextMessageContent messageContent = new InputTextMessageContent();
         messageContent.setMessageText(
-            "Translation (" + getNameByCode(targetLanguageCode) + "): " + TranslateText.translateText(targetLanguageCode, query) +
-            "\nOriginal (" + getNameByCode(translate.detect(query).getLanguage()) + "): " + query
+            "Translation (" +
+            getNameByCode(targetLanguageCode) + "): " +
+            TranslateText.translateText(targetLanguageCode, query) +
+            "\nOriginal (" +
+            getNameByCode(translate.detect(query).getLanguage()) +
+            "): " + query
         );
 
         InlineQueryResultArticle article = new InlineQueryResultArticle();
@@ -367,84 +378,77 @@ public class Bot extends TelegramLongPollingBot {
 
     private SendMessage prepareSTLKeyboard(Message message) {
 
-        // TODO: gayISH - find an adequate solution
-        if (firstSTLMarkup.getKeyboard() != null && secondSTLMarkup.getKeyboard() != null) {
-
-            firstSTLMarkup.getKeyboard().clear();
-            secondSTLMarkup.getKeyboard().clear();
-        }
-
         SendMessage tempMessage = new SendMessage();
         InlineKeyboardButton tempInlineKeyboardButton;
-        List<InlineKeyboardButton> rowInline = new ArrayList<>();
+        List<InlineKeyboardButton> rowInline;
 
-        int buttonsPerRow = 4;
-        double buttonRows = Math.ceil(Double.parseDouble(String.valueOf(languages.size())) / buttonsPerRow / 2
-                + 1); // 1 == number of auxiliary (navigation) rows
+        int buttonsPerRow = 4; // TODO: fix extra page at =1
+        int buttonRows = 10;
         int languageIndex = 0;
+        STL_PAGES_NUM = (int) Math.ceil(Double.parseDouble(String.valueOf(languages.size())) / (buttonsPerRow * buttonRows));
 
         tempMessage.setChatId(String.valueOf(message.getChatId()));
-        tempMessage.setText("Please, select target language - page 1/2");
+        tempMessage.setText("Please, select language - page " + 1 + "/" + STL_PAGES_NUM);
         tempMessage.setChatId(String.valueOf(message.getChatId()));
         tempMessage.setReplyToMessageId(message.getMessageId());
 
-        for (int i = 0; i < buttonRows; i++)
-        {
+        for (int k = 0; k < STL_PAGES_NUM; k++) {
 
-            rowInline = new ArrayList<>();
+            stlMarkupRowsInline = new ArrayList<>();
 
-            for (int j = 0; j < buttonsPerRow; j++) {
+            for (int i = 0; i < buttonRows + Math.ceil(STL_PAGES_NUM / 8.0f); i++) {
 
-                tempInlineKeyboardButton = new InlineKeyboardButton();
-                tempInlineKeyboardButton.setText(languages.get(languageIndex).getName());
-                tempInlineKeyboardButton.setCallbackData(languages.get(languageIndex).getName());
+                rowInline = new ArrayList<>();
 
-                rowInline.add(tempInlineKeyboardButton);
+                for (int j = 0; j < buttonsPerRow; j++) {
 
-                languageIndex++;
-            }
-            firstSTLMarkupRowsInline.add(rowInline);
-        }
+                    if (languageIndex < languages.size()) {
 
-        tempInlineKeyboardButton = new InlineKeyboardButton();
-        tempInlineKeyboardButton.setText(">");
-        tempInlineKeyboardButton.setCallbackData(">STL2");
+                        tempInlineKeyboardButton = new InlineKeyboardButton();
+                        tempInlineKeyboardButton.setText(languages.get(languageIndex).getName());
+                        tempInlineKeyboardButton.setCallbackData(languages.get(languageIndex).getName());
 
-        rowInline.clear();
-        rowInline.add(tempInlineKeyboardButton);
+                        rowInline.add(tempInlineKeyboardButton);
 
-        firstSTLMarkup.setKeyboard(firstSTLMarkupRowsInline);
-        tempMessage.setReplyMarkup(firstSTLMarkup);
-
-        for (int i = 0; i < buttonRows; i++)
-        {
-
-            rowInline = new ArrayList<>();
-
-            for (int j = 0; j < buttonsPerRow; j++) {
-
-                if (languageIndex < languages.size()) {
-
-                    tempInlineKeyboardButton = new InlineKeyboardButton();
-                    tempInlineKeyboardButton.setText(languages.get(languageIndex).getName());
-                    tempInlineKeyboardButton.setCallbackData(languages.get(languageIndex).getName());
-
-                    rowInline.add(tempInlineKeyboardButton);
-
-                    languageIndex++;
+                        languageIndex++;
+                    }
                 }
+
+                stlMarkupRowsInline.add(rowInline);
             }
-            secondSTLMarkupRowsInline.add(rowInline);
+
+            int currentPage = 0;
+
+            for (int m = 0; m < Math.ceil(STL_PAGES_NUM / 8.0f); m++) {
+
+                rowInline = new ArrayList<>();
+
+                for (int l = 0; l < 8 * (m + 1) - (m* Math.ceil(STL_PAGES_NUM / 8.0f)); l++) {
+
+                    if (currentPage < STL_PAGES_NUM) {
+
+                        currentPage++;
+
+                        tempInlineKeyboardButton = new InlineKeyboardButton();
+
+                        tempInlineKeyboardButton.setText(String.valueOf(currentPage));
+                        tempInlineKeyboardButton.setCallbackData("stl" + currentPage);
+
+                        rowInline.add(tempInlineKeyboardButton);
+                    }
+                }
+
+                stlMarkupRowsInline.add(rowInline);
+            }
+            stlMarkup.add(new InlineKeyboardMarkup(stlMarkupRowsInline));
         }
 
-        tempInlineKeyboardButton = new InlineKeyboardButton();
-        tempInlineKeyboardButton.setText("<");
-        tempInlineKeyboardButton.setCallbackData("<STL1");
+        tempMessage.setReplyMarkup(stlMarkup.get(0));
 
-        rowInline.clear();
-        rowInline.add(tempInlineKeyboardButton);
+        for (InlineKeyboardMarkup inlineKeyboardMarkup : stlMarkup) {
 
-        secondSTLMarkup.setKeyboard(secondSTLMarkupRowsInline);
+            System.out.println(inlineKeyboardMarkup);
+        }
 
         return tempMessage;
     }
