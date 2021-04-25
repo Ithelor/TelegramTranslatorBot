@@ -20,8 +20,11 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
 import java.io.InputStream;
-import java.util.*;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Properties;
 
 public class Bot extends TelegramLongPollingBot {
 
@@ -41,12 +44,13 @@ public class Bot extends TelegramLongPollingBot {
     static InlineKeyboardMarkup spcMarkup = new InlineKeyboardMarkup();
     static List<List<InlineKeyboardButton>> spcMarkupRowsInline = new ArrayList<>();
 
-    static String MODE; // either MANUAL for
-                            // TODO: translation-by-command
-                                // or SPECIFIED for automatic translation of specific language
+    static String MODE; // either MANUAL for translation-by-command
+                        // or SPECIFIED for automatic translation of specific language
     static String SPECIFIED_LANGUAGE_CODE;
     static Boolean AWAITING_SPECIFICATION = false;
 
+    static int buttonsPerRow = 4;
+    static int buttonRows = 7;
     static int STL_PAGES_NUM = 0;
 
     private static final Integer CACHETIME = 0;
@@ -156,22 +160,12 @@ public class Bot extends TelegramLongPollingBot {
                         sendMsg(
                             message,
                             "Status: " +
-                            DatabaseHandler.getValueByColumn(
-                                    "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
-                                    "1",
-                                    message.getChatId()
-                            ).toLowerCase()
-                        );
-                    } else {
-                        sendMsg(
-                            message,
-                            "Status: " +
                                 DatabaseHandler.getValueByColumn(
                                     "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
                                     "1",
                                     message.getChatId()
                                 ).toLowerCase() +
-                                " " +
+                                " (" +
                                 Objects.requireNonNull(getNameByCode(
                                     DatabaseHandler.getValueByColumn(
                                         "SELECT latest_specified_language_code FROM chats WHERE chat_id = " + message.getChatId() + ";",
@@ -186,15 +180,104 @@ public class Bot extends TelegramLongPollingBot {
                                         "1",
                                         message.getChatId()
                                     )
-                                )).toLowerCase()
+                                )).toLowerCase() +
+                                " - not used)"
+                        );
+                    } else {
+                        sendMsg(
+                            message,
+                            "Status: " +
+                                DatabaseHandler.getValueByColumn(
+                                    "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                    "1",
+                                    message.getChatId()
+                                ).toLowerCase() +
+                                " (" +
+                                Objects.requireNonNull(getNameByCode(
+                                    DatabaseHandler.getValueByColumn(
+                                        "SELECT latest_specified_language_code FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                        "1",
+                                        message.getChatId()
+                                    )
+                                )).toLowerCase() +
+                                " to " +
+                                Objects.requireNonNull(getNameByCode(
+                                    DatabaseHandler.getValueByColumn(
+                                        "SELECT last_target_language_code FROM chats WHERE chat_id = " + message.getChatId() + ";",
+                                        "1",
+                                        message.getChatId()
+                                    )
+                                )).toLowerCase() +
+                                ")"
                         );
                     }
 
                     break;
 
+                case "/translate":
+                case "/translate@NumeriusCloudBot":
+
+                    if (!message.isReply()) {
+
+                        sendMsg(
+                            message,
+                            "Please reply to the message you want to translate and specify target language"
+                        );
+                    }
+                    else {
+
+                        sendMsg(
+                            message,
+                            "Please specify target language"
+                        );
+                    }
+                    break;
+
                 default:
 
                     if (
+                        message.getText().startsWith("/translate ")
+                            ||
+                        message.getText().startsWith("/translate@NumeriusCloudBot ")
+                    )
+                    {
+                        if (message.isReply())
+                        {
+                            if (!message.getText().startsWith("@", 10)) {
+
+                                sendMsg(
+                                    message.getReplyToMessage(),
+                                    TranslateText.translateText(
+                                        getCodeByName(
+                                            message.getText().substring(11, 12).toUpperCase() +
+                                            message.getText().substring(12)
+                                        ),
+                                        message.getReplyToMessage().getText()
+                                    )
+                                );
+                            }
+                            else {
+
+                                sendMsg(
+                                    message.getReplyToMessage(),
+                                    TranslateText.translateText(
+                                        getCodeByName(
+                                            message.getText().substring(28, 29).toUpperCase() +
+                                            message.getText().substring(29)
+                                        ),
+                                        message.getReplyToMessage().getText()
+                                    )
+                                );
+                            }
+                        }
+                        else {
+                            sendMsg(
+                                    message,
+                                    "Please reply to the message you want to translate"
+                            );
+                        }
+                    }
+                    else if (
                         DatabaseHandler.getValueByColumn
                         (
                             "SELECT translation_mode FROM chats WHERE chat_id = " + message.getChatId() + ";",
@@ -202,8 +285,7 @@ public class Bot extends TelegramLongPollingBot {
                             message.getChatId()
                         )
                         .equals("SPECIFIED")
-                    )
-                    {
+                    ) {
 
                         SPECIFIED_LANGUAGE_CODE =
                             DatabaseHandler.getValueByColumn
@@ -378,25 +460,47 @@ public class Bot extends TelegramLongPollingBot {
 
     private SendMessage prepareSTLKeyboard(Message message) {
 
+        STL_PAGES_NUM = (int) Math.ceil(Double.parseDouble(String.valueOf(languages.size())) / (buttonsPerRow * buttonRows));
+
         SendMessage tempMessage = new SendMessage();
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setChatId(String.valueOf(message.getChatId()));
+        tempMessage.setText("Please, select language - page " + 1 + "/" + STL_PAGES_NUM);
+        tempMessage.setReplyToMessageId(message.getMessageId());
+
         InlineKeyboardButton tempInlineKeyboardButton;
         List<InlineKeyboardButton> rowInline;
 
-        int buttonsPerRow = 4; // TODO: fix extra page at =1
-        int buttonRows = 10;
         int languageIndex = 0;
-        STL_PAGES_NUM = (int) Math.ceil(Double.parseDouble(String.valueOf(languages.size())) / (buttonsPerRow * buttonRows));
-
-        tempMessage.setChatId(String.valueOf(message.getChatId()));
-        tempMessage.setText("Please, select language - page " + 1 + "/" + STL_PAGES_NUM);
-        tempMessage.setChatId(String.valueOf(message.getChatId()));
-        tempMessage.setReplyToMessageId(message.getMessageId());
 
         for (int k = 0; k < STL_PAGES_NUM; k++) {
 
             stlMarkupRowsInline = new ArrayList<>();
 
-            for (int i = 0; i < buttonRows + Math.ceil(STL_PAGES_NUM / 8.0f); i++) {
+            int currentPage = 0;
+
+            for (int m = 0; m < Math.ceil(STL_PAGES_NUM / 8.0f); m++) {
+
+                rowInline = new ArrayList<>();
+
+                for (int l = 0; l < 8 * (m + 1); l++) {
+
+                    if (currentPage < STL_PAGES_NUM) {
+
+                        currentPage++;
+
+                        tempInlineKeyboardButton = new InlineKeyboardButton();
+                        tempInlineKeyboardButton.setText(String.valueOf(currentPage));
+                        tempInlineKeyboardButton.setCallbackData("stl" + currentPage);
+
+                        rowInline.add(tempInlineKeyboardButton);
+                    }
+                }
+
+                stlMarkupRowsInline.add(rowInline);
+            }
+
+            for (int i = 0; i < buttonRows + Math.ceil(STL_PAGES_NUM / 8.0f) - 1; i++) {
 
                 rowInline = new ArrayList<>();
 
@@ -417,29 +521,35 @@ public class Bot extends TelegramLongPollingBot {
                 stlMarkupRowsInline.add(rowInline);
             }
 
-            int currentPage = 0;
+            rowInline = new ArrayList<>();
+            tempInlineKeyboardButton = new InlineKeyboardButton();
 
-            for (int m = 0; m < Math.ceil(STL_PAGES_NUM / 8.0f); m++) {
+            if (k == 0) {
 
-                rowInline = new ArrayList<>();
-
-                for (int l = 0; l < 8 * (m + 1) - (m* Math.ceil(STL_PAGES_NUM / 8.0f)); l++) {
-
-                    if (currentPage < STL_PAGES_NUM) {
-
-                        currentPage++;
-
-                        tempInlineKeyboardButton = new InlineKeyboardButton();
-
-                        tempInlineKeyboardButton.setText(String.valueOf(currentPage));
-                        tempInlineKeyboardButton.setCallbackData("stl" + currentPage);
-
-                        rowInline.add(tempInlineKeyboardButton);
-                    }
-                }
-
-                stlMarkupRowsInline.add(rowInline);
+                tempInlineKeyboardButton.setText(EmojiHandler.Icons.ARROW_RIGHT.get());
+                tempInlineKeyboardButton.setCallbackData("stl" + (k + 1 + 1));
             }
+            else if (k == STL_PAGES_NUM - 1)
+            {
+
+                tempInlineKeyboardButton.setText(EmojiHandler.Icons.ARROW_LEFT.get());
+                tempInlineKeyboardButton.setCallbackData("stl" + (k + 1 - 1));
+            }
+            else
+            {
+
+                tempInlineKeyboardButton.setText(EmojiHandler.Icons.ARROW_LEFT.get());
+                tempInlineKeyboardButton.setCallbackData("stl" + (k + 1 - 1));
+                rowInline.add(tempInlineKeyboardButton);
+
+                tempInlineKeyboardButton = new InlineKeyboardButton();
+                tempInlineKeyboardButton.setText(EmojiHandler.Icons.ARROW_RIGHT.get());
+                tempInlineKeyboardButton.setCallbackData("stl" + (k + 1 + 1));
+            }
+
+            rowInline.add(tempInlineKeyboardButton);
+            stlMarkupRowsInline.add(rowInline);
+
             stlMarkup.add(new InlineKeyboardMarkup(stlMarkupRowsInline));
         }
 
