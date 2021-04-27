@@ -3,6 +3,7 @@ package sample;
 import com.google.cloud.translate.Language;
 import com.google.cloud.translate.Translate;
 import com.google.cloud.translate.TranslateOptions;
+import com.vdurmont.emoji.EmojiParser;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.meta.api.methods.AnswerInlineQuery;
@@ -49,8 +50,8 @@ public class Bot extends TelegramLongPollingBot {
     static String SPECIFIED_LANGUAGE_CODE;
     static Boolean AWAITING_SPECIFICATION = false;
 
-    static int buttonsPerRow = 4;
-    static int buttonRows = 7;
+    static final int buttonsPerRow = 4;
+    static final int buttonRows = 7;
     static int STL_PAGES_NUM = 0;
 
     private static final Integer CACHETIME = 0;
@@ -320,6 +321,8 @@ public class Bot extends TelegramLongPollingBot {
             editMessageText.setChatId(String.valueOf(chat_id));
             editMessageText.setMessageId((int) message_id);
 
+            int pageNum;
+
             switch (call_data)
             {
 
@@ -343,10 +346,10 @@ public class Bot extends TelegramLongPollingBot {
 
                     if (AWAITING_SPECIFICATION) {
 
-                        // TODO: change stl navigation button label on click
+                        // TODO: change active stl navigation button label on click
                         if (call_data.startsWith("stl")) {
 
-                            int pageNum = Integer.parseInt(call_data.substring(3)) - 1;
+                            pageNum = Integer.parseInt(call_data.substring(3)) - 1;
                             editMessageText.setReplyMarkup(stlMarkup.get(pageNum));
                             editMessageText.setText("Please, select language - page " + (pageNum + 1) + "/" + STL_PAGES_NUM);
                         }
@@ -367,7 +370,7 @@ public class Bot extends TelegramLongPollingBot {
 
                         if (call_data.startsWith("stl")) {
 
-                            int pageNum = Integer.parseInt(call_data.substring(3)) - 1;
+                            pageNum = Integer.parseInt(call_data.substring(3)) - 1;
                             editMessageText.setReplyMarkup(stlMarkup.get(pageNum));
                             editMessageText.setText("Please, select language - page " + (pageNum + 1) + "/" + STL_PAGES_NUM);
                         }
@@ -479,27 +482,6 @@ public class Bot extends TelegramLongPollingBot {
 
             int currentPage = 0;
 
-            for (int m = 0; m < Math.ceil(STL_PAGES_NUM / 8.0f); m++) {
-
-                rowInline = new ArrayList<>();
-
-                for (int l = 0; l < 8 * (m + 1); l++) {
-
-                    if (currentPage < STL_PAGES_NUM) {
-
-                        currentPage++;
-
-                        tempInlineKeyboardButton = new InlineKeyboardButton();
-                        tempInlineKeyboardButton.setText(String.valueOf(currentPage));
-                        tempInlineKeyboardButton.setCallbackData("stl" + currentPage);
-
-                        rowInline.add(tempInlineKeyboardButton);
-                    }
-                }
-
-                stlMarkupRowsInline.add(rowInline);
-            }
-
             for (int i = 0; i < buttonRows + Math.ceil(STL_PAGES_NUM / 8.0f) - 1; i++) {
 
                 rowInline = new ArrayList<>();
@@ -550,15 +532,46 @@ public class Bot extends TelegramLongPollingBot {
             rowInline.add(tempInlineKeyboardButton);
             stlMarkupRowsInline.add(rowInline);
 
+            for (int m = 0; m < Math.ceil(STL_PAGES_NUM / 8.0f); m++) {
+
+                rowInline = new ArrayList<>();
+
+                for (int l = 0; l < 6 * (m + 1); l++) { // 8 ?
+
+                    if (currentPage < STL_PAGES_NUM) {
+
+                        StringBuilder buttonText = new StringBuilder();
+                        for (int i = 0; i < String.valueOf(currentPage).length(); i++) {
+
+                            // TODO: fix empty extra pages on small buttonsPerRow values already and
+                            // TODO: put them to the config
+                            buttonText.append(EmojiParser.parseToUnicode(
+                                EmojiHandler.digitsToEmojis[
+                                    Integer.parseInt(
+                                        Character.toString(
+                                            String.valueOf(currentPage).charAt(i)
+                                        )
+                                    ) + 1] // TODO: isn't safe - redo
+                            ));
+                        }
+
+                        currentPage++;
+
+                        tempInlineKeyboardButton = new InlineKeyboardButton();
+                        tempInlineKeyboardButton.setText(buttonText.toString());
+                        tempInlineKeyboardButton.setCallbackData("stl" + currentPage);
+
+                        rowInline.add(tempInlineKeyboardButton);
+                    }
+                }
+
+                stlMarkupRowsInline.add(rowInline);
+            }
+
             stlMarkup.add(new InlineKeyboardMarkup(stlMarkupRowsInline));
         }
 
         tempMessage.setReplyMarkup(stlMarkup.get(0));
-
-        for (InlineKeyboardMarkup inlineKeyboardMarkup : stlMarkup) {
-
-            System.out.println(inlineKeyboardMarkup);
-        }
 
         return tempMessage;
     }
